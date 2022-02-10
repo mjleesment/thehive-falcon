@@ -1,4 +1,4 @@
-#!/bin/python2
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 import requests
 import json
@@ -18,14 +18,16 @@ import sys
 from requests import Request, Session
 
 class FalconAuth:
-    def __init__(self,client_id,client_secret):
+    def __init__(self,client_id, client_secret, domain):
         self.client_id=client_id
         self.client_secret=client_secret
+        self.domain=domain
         with open("OAuth2.json","w+") as f:
         	f.write("")
+
     def newtoken(self):
-        response=requests.post("https://api.crowdstrike.com/oauth2/token",data={"client_id":self.client_id,"client_secret":self.client_secret},
-            headers={"Content-Type":"application/x-www-form-urlencoded","Accept":"application/json"})
+        token_get_headers=headers={'Content-Type':'application/x-www-form-urlencoded','Accept':'application/json'}
+        response=requests.post(self.domain+"/oauth2/token",headers=token_get_headers,data={"client_id":self.client_id,"client_secret":self.client_secret})
         if not response.status_code==201:
             return None
         json_data=response.json()
@@ -34,20 +36,19 @@ class FalconAuth:
 
     def getToken(self):
         tokendata=''
-        with open("OAuth2.json","r") as f:
-            try:
+        try:
+            with open("OAuth2.json","r") as f:
                 tokendata=json.loads(f.read())
                 if tokendata['expires'] < time.time()+1.0:
                     tokendata=self.newtoken()
-            except Exception:
-                #print("Error loading oauth2 data")
-                #traceback.print_exc()
-                tokendata= self.newtoken()
+        except Exception:
+            #print("Error loading oauth2 data")
+            #traceback.print_exc()
+            tokendata= self.newtoken()
         with open("OAuth2.json","w+") as f:
             f.write(json.dumps(tokendata))
             return tokendata['access_token']
 class ES:
-
     def __init__(self, config, logger):
         import elasticsearch
         self.es = elasticsearch.Elasticsearch(hosts=config['hosts'])
@@ -57,14 +58,12 @@ class ES:
 
     def index(self, data, id, ts):
         try:
-            self.es.create(index=self.index_name,
-                           doc_type=self.doctype, id=id, body=data, timestamp=ts)
+            self.es.create(index=self.index_name, doc_type=self.doctype, id=id, body=data, timestamp=ts)
         except Exception as e:
             self.lh.exception('Elasticsearch index error:' + str(e))
 
 
 class StreamProcessor(threading.Thread):
-
     def __init__(self, stream, stream_resource, processor, logger, offsets_file='./offsets.json', es=None):
         threading.Thread.__init__(self)
         self.stream = stream
@@ -123,7 +122,6 @@ class StreamProcessor(threading.Thread):
 
 
 class FalconStreamingAPI:
-
     def __init__(self, config, processor, logger=None):
         if not logger:
             self.lh = logging.getLogger('PyFalcon')
@@ -139,12 +137,12 @@ class FalconStreamingAPI:
             self.es = None
         self.key = config['falcon_api_key']
         self._id = config['falcon_api_id']
-        self.auth  = FalconAuth(self._id,self.key)
+        self.RequestUri_Host = config['falcon_hose_domain']
+        self.auth  = FalconAuth(self._id, self.key, self.RequestUri_Host)
         self.Method = 'GET'
         self.md5 = ''
         self.url = config['falcon_data_feed_url'] + \
             '?appId=' + config['client_name']
-        self.RequestUri_Host = config['falcon_hose_domain']
         self.RequestUri_AbsolutePath = '/sensors/entities/datafeed/v2'
         self.RequestUri_Query = '?appId=' + config['client_name']
         self.Headers = {}
@@ -157,8 +155,7 @@ class FalconStreamingAPI:
             self.offsets_file = './offsets_file.json'
 
     def calculateHMAC(self, _key, _requestString):
-        digest = hmac.new(str(_key), msg=str(_requestString),
-                          digestmod=hashlib.sha256).digest()
+        digest = hmac.new(_key, msg=_requestString, digestmod=hashlib.sha256).digest()
         return base64.b64encode(digest)
 
     def CanonicalQueryString(self, qstr):
@@ -167,12 +164,11 @@ class FalconStreamingAPI:
     def connect(self):
         try:
             self.date = datetime.datetime.utcnow().strftime('%a, %d %b %Y %X GMT')
-            self.lh.debug(
-                'Connecting to the streaming api with date stamp:' + self.date)
+            self.lh.debug('Connecting to the streaming api with date stamp:' + self.date)
             requestString = self.Method + '\n' + self.md5 + '\n' + self.date + '\n' + self.RequestUri_Host + \
                 self.RequestUri_AbsolutePath + '\n' + \
                 self.CanonicalQueryString(self.RequestUri_Query)
-            signature = self.calculateHMAC(self.key, requestString)
+            signature = self.calculateHMAC(str.encode(self.key), str.encode(requestString))
             self.Headers['X-CS-Date'] = self.date
             self.Headers['Authorization'] = "Bearer {}".format(self.auth.getToken())
             s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -191,33 +187,34 @@ class FalconStreamingAPI:
             c.sendall(rs)
             data = c.recv(10000)
             c.close()
-            body = data.split('\r\n\r\n')[1]
+            body = data.split(str.encode('\r\n\r\n'))[1]
             self.data_stream = json.loads(body)
             if 'errors' in self.data_stream:
                 self.lh.debug('Errors in data stream response:\n' +
                               json.dumps(self.data_stream, indent=4, sort_keys=True))
                 self.reconnect = True
                 raise
-            elif self.data_stream['meta']['pagination'] and 'total' in self.data_stream['meta']['pagination'] and self.data_stream['meta']['pagination']['total'] > 0:
+            elif self.data_stream['meta']: #and 'total' in self.data_stream['meta']['pagination'] and self.data_stream['meta']['pagination']['total'] > 0:
                 if 'resources' in self.data_stream:
                     self.stream_resources = self.data_stream['resources']
                     self.lh.info(
-                        'Discovered ' + str(len(self.stream_resources)) + ' stream resources.')
+                        'Discovered ' + str(len(self.stream_resources)) if self.stream_resources else "0" + ' stream resources.')
                     self.reconnect = False
                 else:
                     self.lh.debug(
-                        'No resrouces:\n' + json.dumps(str(body), indent=4, sort_keys=True))
+                        'No resources:\n' + json.dumps(str(body), indent=4, sort_keys=True))
                     self.reconnect = False
                     return False
                 until = 300
-                for stream in self.stream_resources:
-                    expiration = stream['sessionToken']['expiration']
-                    expires = calendar.timegm(time.strptime(
-                        expiration[:len(expiration) - 4] + 'Z', '%Y-%m-%dT%H:%M:%S.%fZ'))
-                    now = time.time()
-                    if expires - now < until:
-                        until = expires - now
-                        self.expires = expires
+                if self.stream_resources:
+                    for stream in self.stream_resources:
+                        expiration = stream['sessionToken']['expiration']
+                        expires = calendar.timegm(time.strptime(
+                            expiration[:len(expiration) - 4] + 'Z', '%Y-%m-%dT%H:%M:%S.%fZ'))
+                        now = time.time()
+                        if expires - now < until:
+                            until = expires - now
+                            self.expires = expires
 
                 self.lh.debug('Rediscovering streams in:' + str(until))
                 if until > 295:
@@ -226,15 +223,15 @@ class FalconStreamingAPI:
                     self.lh.debug('Short token expiry!:' + str(until))
                     self.sleeptime = 300
                 self.lh.debug('New Expiration:' + expiration)
-            else:
-                if self.data_stream['meta']['pagination'] and 'total' in self.data_stream['meta']['pagination'] and self.data_stream['meta']['pagination']['total'] == 0:
-                    self.lh.debug('Discover attempt resulted in 0 resources')
-                    self.reconnect = False
-                    return False
-                self.lh.debug('Unknown response:\n' + str(self.data_stream))
-                raise
-                self.expires = time.time() + 60
-                self.reconnect = False
+            #else:
+            #    if self.data_stream['meta']['pagination'] and 'total' in self.data_stream['meta']['pagination'] and self.data_stream['meta']['pagination']['total'] == 0:
+            #        self.lh.debug('Discover attempt resulted in 0 resources')
+            #        self.reconnect = False
+            #        return False
+            #    self.lh.debug('Unknown response:\n' + str(self.data_stream))
+            #    raise
+            #    self.expires = time.time() + 60
+            #    self.reconnect = False
         except Exception as e:
             traceback.print_exc()
             self.lh.exception(str(e))
@@ -277,7 +274,7 @@ class FalconStreamingAPI:
                         self.lh.debug('Stream processor thread is not alive.')
                 else:
                     self.lh.error(
-                        "Error opening stream '" + self.stream_resources[i]['dataFeedURL'] + "':\n" + response.text)
+                        "Error opening stream '" + self.stream_resources if self.stream_resources[i]['dataFeedURL'] else "None" + "':\n" + response.text)
                     continue
 
             self.stream_resources = []
@@ -286,7 +283,7 @@ class FalconStreamingAPI:
 
 
 def processor(stream_data):
-    print stream_data
+    print(stream_data)
 
 
 def main():
@@ -299,7 +296,7 @@ def main():
             sleeptime = 300
             if r.connect():
                 r.streamData()
-                print 'sleeping for ' + str(sleeptime) + ' seconds.'
+                print('sleeping for ' + str(sleeptime) + ' seconds.')
                 time.sleep(sleeptime)
             if not r.reconnect:
                 time.sleep(sleeptime)
@@ -313,5 +310,3 @@ if __name__ == '__main__':
     reload(sys)
     sys.setdefaultencoding('utf-8')
     main()
-
-
