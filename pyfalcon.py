@@ -193,7 +193,8 @@ class FalconStreamingAPI:
             c.close()
             body = data.split(str.encode('\r\n\r\n'))[1]
             self.data_stream = json.loads(body)
-            print(self.data_stream)
+            expiration = ""
+
             if 'errors' in self.data_stream:
                 self.lh.debug('Errors in data stream response:\n' +
                               json.dumps(self.data_stream, indent=4, sort_keys=True))
