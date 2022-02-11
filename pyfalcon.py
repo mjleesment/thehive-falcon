@@ -255,33 +255,34 @@ class FalconStreamingAPI:
             except:
                 pass
 
-            for i in range(len(self.stream_resources)):
-                ds_headers = {'Authorization': 'Token ' + self.stream_resources[i]['sessionToken']['token'],
-                              'Accepts': 'appication/json'}
-                self.lh.info('Opening stream for data feed:' +
-                             self.stream_resources[i]['dataFeedURL'])
-                offset = 0
-                if offsets and self.stream_resources[i]['dataFeedURL'] in offsets:
-                    offset = offsets[self.stream_resources[i]['dataFeedURL']]
-                request_url = self.stream_resources[i]['dataFeedURL'] + \
-                    '&offset=' + str(offset)
-                self.lh.debug('DS request URL:' + request_url)
-                response = requests.get(
-                    request_url, headers=ds_headers, stream=True)
-                if response.status_code == 200:
-                    stream_processor = StreamProcessor(
-                        response, self.stream_resources[i], self.processor, self.lh, offsets_file=self.offsets_file, es=self.es)
-                    stream_processor.setDaemon(True)
-                    stream_processor.start()
-                    time.sleep(3)
-                    if stream_processor.isAlive():
-                        self.lh.debug('Started a new  stream processor thread')
+            if self.stream_resources:
+                for i in range(len(self.stream_resources)):
+                    ds_headers = {'Authorization': 'Token ' + self.stream_resources[i]['sessionToken']['token'],
+                                  'Accepts': 'appication/json'}
+                    self.lh.info('Opening stream for data feed:' +
+                                 self.stream_resources[i]['dataFeedURL'])
+                    offset = 0
+                    if offsets and self.stream_resources[i]['dataFeedURL'] in offsets:
+                        offset = offsets[self.stream_resources[i]['dataFeedURL']]
+                    request_url = self.stream_resources[i]['dataFeedURL'] + \
+                        '&offset=' + str(offset)
+                    self.lh.debug('DS request URL:' + request_url)
+                    response = requests.get(
+                        request_url, headers=ds_headers, stream=True)
+                    if response.status_code == 200:
+                        stream_processor = StreamProcessor(
+                            response, self.stream_resources[i], self.processor, self.lh, offsets_file=self.offsets_file, es=self.es)
+                        stream_processor.setDaemon(True)
+                        stream_processor.start()
+                        time.sleep(3)
+                        if stream_processor.isAlive():
+                            self.lh.debug('Started a new  stream processor thread')
+                        else:
+                            self.lh.debug('Stream processor thread is not alive.')
                     else:
-                        self.lh.debug('Stream processor thread is not alive.')
-                else:
-                    self.lh.error(
-                        "Error opening stream '" + self.stream_resources[i]['dataFeedURL'] + "':\n" + response.text)
-                    continue
+                        self.lh.error(
+                            "Error opening stream '" + self.stream_resources[i]['dataFeedURL'] + "':\n" + response.text)
+                        continue
 
             self.stream_resources = []
         except Exception as e:
