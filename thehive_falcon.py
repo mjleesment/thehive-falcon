@@ -190,16 +190,18 @@ class TheHiveProcessor:
         if results.status_code > 199 and results.status_code < 300:
             self.lh.debug("Created alert:"+alert["title"])
         else:
-            self.lh.debug("Alert creation error:" + str(results.status_code)+"\n"+results.text)
+            self.lh.debug("Alert creation error:" +
+                          str(results.status_code)+"\n"+results.text)
 
     def caseTemplate(self, event):
         return self.conf['defaultCaseTemplate']
 
     def parse_artifacts(self, event):
+        print(event)
         artifacts = []
         iocmap = {"domain": "domain", "ip": "ip", "filename": "filename",
-                  "command_line": "commandline", "hash_sha256": "hash", "sha256":"hash",
-                  "registry_key": "registry"}
+                  "command_line": "commandline", "hash_sha256": "hash",
+                  "sha256":"hash", "registry_key": "registry"}
         if 'observable_map' in self.conf:
             for o in self.conf['observable_map']:
                 if o in event:

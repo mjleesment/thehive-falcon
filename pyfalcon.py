@@ -26,8 +26,11 @@ class FalconAuth:
         	f.write("")
 
     def newtoken(self):
-        token_get_headers=headers={'Content-Type':'application/x-www-form-urlencoded','Accept':'application/json'}
-        response=requests.post(self.domain+"/oauth2/token",headers=token_get_headers,data={"client_id":self.client_id,"client_secret":self.client_secret})
+        token_get_headers={"Content-Type":"application/x-www-form-urlencoded","Accept":"application/json"}
+        try:
+            response=requests.post("https://"+self.domain+"/oauth2/token",headers=token_get_headers, data={"client_id":self.client_id,"client_secret":self.client_secret})
+        except Exception as e:
+            print(e)
         if not response.status_code==201:
             return None
         json_data=response.json()
@@ -138,6 +141,7 @@ class FalconStreamingAPI:
         self.key = config['falcon_api_key']
         self._id = config['falcon_api_id']
         self.RequestUri_Host = config['falcon_hose_domain']
+        print(self.RequestUri_Host)
         self.auth  = FalconAuth(self._id, self.key, self.RequestUri_Host)
         self.Method = 'GET'
         self.md5 = ''
@@ -189,12 +193,13 @@ class FalconStreamingAPI:
             c.close()
             body = data.split(str.encode('\r\n\r\n'))[1]
             self.data_stream = json.loads(body)
+            print(self.data_stream)
             if 'errors' in self.data_stream:
                 self.lh.debug('Errors in data stream response:\n' +
                               json.dumps(self.data_stream, indent=4, sort_keys=True))
                 self.reconnect = True
                 raise
-            elif self.data_stream['meta']: #and 'total' in self.data_stream['meta']['pagination'] and self.data_stream['meta']['pagination']['total'] > 0:
+            elif self.data_stream['meta']: #['pagination'] and 'total' in self.data_stream['meta']['pagination'] and self.data_stream['meta']['pagination']['total'] > 0:
                 if 'resources' in self.data_stream:
                     self.stream_resources = self.data_stream['resources']
                     self.lh.info(
@@ -274,7 +279,7 @@ class FalconStreamingAPI:
                         self.lh.debug('Stream processor thread is not alive.')
                 else:
                     self.lh.error(
-                        "Error opening stream '" + self.stream_resources if self.stream_resources[i]['dataFeedURL'] else "None" + "':\n" + response.text)
+                        "Error opening stream '" + self.stream_resources[i]['dataFeedURL'] + "':\n" + response.text)
                     continue
 
             self.stream_resources = []
